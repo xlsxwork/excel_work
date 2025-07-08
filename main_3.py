@@ -161,7 +161,7 @@ class UIComponents:
         
         for name in sheet_names:
             with cols[col_idx]:
-                st.markdown(f"<div style='padding: 0.5rem; background-color: #f0f2f6; border-radius: 0.5rem; text-align: center;'>{name}</div>", 
+                st.markdown(f"<div style='padding: 0.7rem; background-color: #37745B; border-radius: 0.8rem; text-align: center;'>{name}</div>", 
                           unsafe_allow_html=True)
             col_idx = (col_idx + 1) % 4
 

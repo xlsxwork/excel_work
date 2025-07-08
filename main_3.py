@@ -494,7 +494,7 @@ class GoogleSheetSearchApp:
             if st.session_state.search_results is not None:
                 UIComponents.show_results(
                     st.session_state.search_results, 
-                    selected_columns, 
+                    st.session_state.get('output_columns', []), 
                     st.session_state.latest_price_col
                 )
 

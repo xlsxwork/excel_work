@@ -118,31 +118,30 @@ class DataProcessor:
     @staticmethod
     def extract_price_columns(df):
         price_cols = []
-        date_pattern = re.compile(r'\d{1,2}\.\d{1,2}\.\d{2,4}')
+        date_pattern = re.compile(r'Цена\s*\n?\s*\d{4}-\d{2}-\d{2}')
         
         for col in df.columns:
-            if col.lower() in ['цена', 'price'] or date_pattern.search(col):
+            if col.lower().startswith('цена') or date_pattern.search(col):
                 price_cols.append(col)
         
         return price_cols
     
     @staticmethod
-    def get_latest_price_column(price_columns):
-        date_pattern = re.compile(r'(\d{1,2})\.(\d{1,2})\.(\d{2,4})')
+    def sort_price_columns(price_columns):
+        date_pattern = re.compile(r'\d{4}-\d{2}-\d{2}')
         
         dated_cols = []
         for col in price_columns:
             match = date_pattern.search(col)
             if match:
-                day, month, year = map(int, match.groups())
-                year = 2000 + year if year < 100 else year
-                dated_cols.append((col, datetime(year, month, day)))
+                date_str = match.group()
+                dated_cols.append((col, datetime.strptime(date_str, '%Y-%m-%d')))
         
         if dated_cols:
             dated_cols.sort(key=lambda x: x[1], reverse=True)
-            return dated_cols[0][0]
+            return [col[0] for col in dated_cols]
         
-        return price_columns[0] if price_columns else None
+        return price_columns
 
 # --- UI ---
 class UIComponents:
@@ -242,7 +241,7 @@ class GoogleSheetSearchApp:
         if 'data_loaded' not in st.session_state:
             st.session_state.data_loaded = False
         if 'search_column' not in st.session_state:
-            st.session_state.search_column = "название"
+            st.session_state.search_column = "Название"
         if 'sheet_names' not in st.session_state:
             st.session_state.sheet_names = []
         if 'price_columns' not in st.session_state:
@@ -317,12 +316,11 @@ class GoogleSheetSearchApp:
                     
                     # Определяем колонки с ценами
                     price_columns = DataProcessor.extract_price_columns(st.session_state.combined_df)
-                    st.session_state.price_columns = price_columns
+                    st.session_state.price_columns = DataProcessor.sort_price_columns(price_columns)
                     
                     # Находим самую новую цену
-                    if price_columns:
-                        latest_price_col = DataProcessor.get_latest_price_column(price_columns)
-                        st.session_state.latest_price_col = latest_price_col
+                    if st.session_state.price_columns:
+                        st.session_state.latest_price_col = st.session_state.price_columns[0]
                     
                     st.success(f"✅ Данные успешно загружены. Записей: {len(st.session_state.combined_df)}")
                     
@@ -400,7 +398,11 @@ class GoogleSheetSearchApp:
             
             # Определяем стандартные колонки для вывода
             default_columns = ['Лист']
-            if 'название' in combined_df.columns:
+            if 'URL' in combined_df.columns:
+                default_columns.append('URL')
+            if 'Название' in combined_df.columns:
+                default_columns.append('Название')
+            elif 'название' in combined_df.columns:
                 default_columns.append('название')
             else:
                 default_columns.append(combined_df.columns[0])

@@ -270,16 +270,16 @@ class GoogleSheetSearchApp:
             except ValueError as e:
                 st.error(f"Ошибка конфигурации: {str(e)}")
                 return
-                
+    
             col1, _, _, _ = st.columns([1, 1, 1, 1])
             with col1:
                 password = st.text_input("🔒 Введите пароль для доступа", 
-                                      type="password",
-                                      key="password_input")
+                                         type="password",
+                                         key="password_input")
                 if st.button("Войти", key="login_button") or password:
                     if password == correct_password:
                         st.session_state.authenticated = True
-                        self.load_available_sheets()
+                        st.session_state.sheets_loaded = False  # <- добавили
                         st.rerun()
                     elif password:
                         st.error("❌ Неверный пароль")
@@ -379,11 +379,14 @@ class GoogleSheetSearchApp:
             st.success(f"🔎 Найдено: {len(results)} записей")
 
     def show_main_app(self):
+        if not st.session_state.sheets_loaded:
+            self.load_available_sheets()
+            st.session_state.sheets_loaded = True
+    
         if st.session_state.available_sheets:
             st.subheader("📂 Доступные Google Таблицы")
             cols = st.columns(3)
             col_index = 0
-            
             for sheet in st.session_state.available_sheets:
                 with cols[col_index]:
                     with st.container(border=True):

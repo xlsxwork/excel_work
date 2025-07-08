@@ -5,6 +5,7 @@ import gspread
 from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 # --- Конфигурация через Streamlit Secrets ---
 class AppConfig:
@@ -114,6 +115,35 @@ class DataProcessor:
         match_count = sum(1 for word in query_words if word in row_words)
         return match_count if not require_all or match_count == len(query_words) else 0
 
+    @staticmethod
+    def extract_price_columns(df):
+        price_cols = []
+        date_pattern = re.compile(r'\d{1,2}\.\d{1,2}\.\d{2,4}')
+        
+        for col in df.columns:
+            if col.lower() in ['цена', 'price'] or date_pattern.search(col):
+                price_cols.append(col)
+        
+        return price_cols
+    
+    @staticmethod
+    def get_latest_price_column(price_columns):
+        date_pattern = re.compile(r'(\d{1,2})\.(\d{1,2})\.(\d{2,4})')
+        
+        dated_cols = []
+        for col in price_columns:
+            match = date_pattern.search(col)
+            if match:
+                day, month, year = map(int, match.groups())
+                year = 2000 + year if year < 100 else year
+                dated_cols.append((col, datetime(year, month, day)))
+        
+        if dated_cols:
+            dated_cols.sort(key=lambda x: x[1], reverse=True)
+            return dated_cols[0][0]
+        
+        return price_columns[0] if price_columns else None
+
 # --- UI ---
 class UIComponents:
     @staticmethod
@@ -125,7 +155,19 @@ class UIComponents:
         st.title(AppConfig.PAGE_TITLE)
 
     @staticmethod
-    def show_results(results, selected_columns):
+    def show_sheet_sources(sheet_names):
+        st.markdown("### 📌 Данные собираются со следующих сайтов:")
+        cols = st.columns(4)
+        col_idx = 0
+        
+        for name in sheet_names:
+            with cols[col_idx]:
+                st.markdown(f"<div style='padding: 0.5rem; background-color: #f0f2f6; border-radius: 0.5rem; text-align: center;'>{name}</div>", 
+                          unsafe_allow_html=True)
+            col_idx = (col_idx + 1) % 4
+
+    @staticmethod
+    def show_results(results, selected_columns, latest_price_col=None):
         if not results.empty:
             results = results.reset_index(drop=True)
             results.index = results.index + 2
@@ -135,6 +177,17 @@ class UIComponents:
             
             if selected_columns:
                 columns_to_show = [col for col in selected_columns if col in results.columns]
+                
+                # Переименовываем колонку с последней ценой
+                if latest_price_col and latest_price_col in columns_to_show:
+                    columns_to_show = [
+                        f"Цена актуальная ({latest_price_col})" if col == latest_price_col else col 
+                        for col in columns_to_show
+                    ]
+                    results_with_index = results_with_index.rename(
+                        columns={latest_price_col: f"Цена актуальная ({latest_price_col})"}
+                    )
+                
                 filtered_results = results_with_index[columns_to_show]
             else:
                 filtered_results = results_with_index
@@ -189,7 +242,13 @@ class GoogleSheetSearchApp:
         if 'data_loaded' not in st.session_state:
             st.session_state.data_loaded = False
         if 'search_column' not in st.session_state:
-            st.session_state.search_column = None
+            st.session_state.search_column = "название"
+        if 'sheet_names' not in st.session_state:
+            st.session_state.sheet_names = []
+        if 'price_columns' not in st.session_state:
+            st.session_state.price_columns = []
+        if 'latest_price_col' not in st.session_state:
+            st.session_state.latest_price_col = None
 
     def authenticate(self):
         if not st.session_state.authenticated:
@@ -204,12 +263,12 @@ class GoogleSheetSearchApp:
                 password = st.text_input("🔒 Введите пароль для доступа", 
                                       type="password",
                                       key="password_input")
-                if st.button("Войти", key="login_button"):
+                if st.button("Войти", key="login_button") or password:
                     if password == correct_password:
                         st.session_state.authenticated = True
                         self.load_available_sheets()
                         st.rerun()
-                    else:
+                    elif password:
                         st.error("❌ Неверный пароль")
             return
         self.show_main_app()
@@ -245,6 +304,7 @@ class GoogleSheetSearchApp:
                 with st.spinner("Загрузка данных..."):
                     spreadsheet = self.client.open_by_key(sheet_id)
                     all_data = self.process_sheets(spreadsheet)
+                    sheet_names = [ws.title for ws in spreadsheet.worksheets()]
 
                     if not all_data:
                         st.warning("⚠️ В таблице нет данных")
@@ -253,8 +313,25 @@ class GoogleSheetSearchApp:
                     st.session_state.combined_df = pd.concat(all_data, ignore_index=True)
                     st.session_state.sheet_id = sheet_id
                     st.session_state.data_loaded = True
-                    st.session_state.search_column = None
+                    st.session_state.sheet_names = sheet_names
+                    
+                    # Определяем колонки с ценами
+                    price_columns = DataProcessor.extract_price_columns(st.session_state.combined_df)
+                    st.session_state.price_columns = price_columns
+                    
+                    # Находим самую новую цену
+                    if price_columns:
+                        latest_price_col = DataProcessor.get_latest_price_column(price_columns)
+                        st.session_state.latest_price_col = latest_price_col
+                    
                     st.success(f"✅ Данные успешно загружены. Записей: {len(st.session_state.combined_df)}")
+                    
+                    # Показываем источники данных
+                    UIComponents.show_sheet_sources(sheet_names)
+                    
+                    # Автоматически запускаем поиск, если есть запрос
+                    if st.session_state.get('search_query'):
+                        self.perform_search()
             return True
             
         except gspread.exceptions.APIError as e:
@@ -264,6 +341,33 @@ class GoogleSheetSearchApp:
         except Exception as e:
             st.error(f"❌ Неожиданная ошибка: {str(e)}")
             return False
+
+    def perform_search(self):
+        search_query = st.session_state.get('search_query', '')
+        if not search_query or not st.session_state.data_loaded or st.session_state.combined_df is None:
+            return
+
+        combined_df = st.session_state.combined_df
+        selected_column = st.session_state.search_column
+        selected_columns = st.session_state.get('output_columns', [])
+        exact_match = st.session_state.get('exact_match', True)
+        partial_match = st.session_state.get('partial_match', False)
+
+        with st.spinner("Поиск..."):
+            query_words = DataProcessor.split_preserve_sizes(search_query)
+            require_all = exact_match and not partial_match
+            
+            search_df = combined_df.copy()
+            search_df['__match_count'] = search_df[selected_column].apply(
+                lambda text: DataProcessor.match_query(text, query_words, require_all=require_all)
+            )
+
+            results = search_df[search_df['__match_count'] > 0]
+            results = results.sort_values(by='__match_count', ascending=False)
+            results = results.drop(columns='__match_count')
+
+            st.success(f"🔎 Найдено: {len(results)} записей")
+            UIComponents.show_results(results, selected_columns, st.session_state.latest_price_col)
 
     def show_main_app(self):
         if st.session_state.available_sheets:
@@ -278,7 +382,8 @@ class GoogleSheetSearchApp:
                         st.markdown(f"[Открыть таблицу]({sheet['url']})")
                         if st.button(f"Выбрать {sheet['title']}", key=f"select_{sheet['id']}"):
                             st.session_state.sheet_url = sheet['url']
-                            st.rerun()
+                            st.session_state.data_loaded = False
+                            self.load_data(sheet['url'])
                 col_index = (col_index + 1) % 3
             st.divider()
         
@@ -286,57 +391,54 @@ class GoogleSheetSearchApp:
             "📎 Вставьте ссылку на Google Таблицу",
             value=st.session_state.get('sheet_url', ''),
             key="sheet_url",
-            help="Пример: https://docs.google.com/spreadsheets/d/ID_ТАБЛИЦЫ/edit#gid=ID_ЛИСТА"
+            help="Пример: https://docs.google.com/spreadsheets/d/ID_ТАБЛИЦЫ/edit#gid=ID_ЛИСТА",
+            on_change=lambda: self.load_data(st.session_state.sheet_url)
         )
-        
-        if st.button("🔄 Загрузить данные", key="load_data_button"):
-            if self.load_data(sheet_url):
-                st.rerun()
 
         if st.session_state.data_loaded and st.session_state.combined_df is not None:
             combined_df = st.session_state.combined_df
             
-            if st.session_state.search_column is None:
-                st.session_state.search_column = combined_df.columns[0]
+            # Определяем стандартные колонки для вывода
+            default_columns = ['Лист']
+            if 'название' in combined_df.columns:
+                default_columns.append('название')
+            else:
+                default_columns.append(combined_df.columns[0])
             
-            selected_column = st.selectbox(
-                "📁 Выберите колонку для поиска",
-                combined_df.columns,
-                index=list(combined_df.columns).index(st.session_state.search_column),
-                key="column_select"
-            )
+            # Добавляем колонки с ценами
+            if st.session_state.price_columns:
+                default_columns.extend(st.session_state.price_columns)
             
-            st.session_state.search_column = selected_column
-
-            all_columns = ['Лист'] + [col for col in combined_df.columns if col != 'Лист']
+            all_columns = [col for col in combined_df.columns if col != 'Лист']
+            all_columns = ['Лист'] + sorted(all_columns)
+            
             selected_columns = st.multiselect(
                 "📋 Выберите колонки для вывода",
                 options=all_columns,
-                default=all_columns[:3] if len(all_columns) > 3 else all_columns,
+                default=default_columns,
                 key="output_columns"
             )
 
-            search_query = st.text_input("🔎 Введите слово или часть слова для поиска", key="search_query")
+            search_query = st.text_input(
+                "🔎 Введите слово или часть слова для поиска", 
+                key="search_query",
+                on_change=self.perform_search
+            )
 
-            exact_match = st.checkbox("🧩 Только полное совпадение всех слов", value=True, key="exact_match")
-            partial_match = st.checkbox("🔍 Частичное совпадение", key="partial_match")
+            exact_match = st.checkbox(
+                "🧩 Только полное совпадение всех слов", 
+                value=True, 
+                key="exact_match",
+                on_change=self.perform_search
+            )
+            partial_match = st.checkbox(
+                "🔍 Частичное совпадение", 
+                key="partial_match",
+                on_change=self.perform_search
+            )
 
-            if st.button("🔍 Найти", key="search_button") and search_query:
-                with st.spinner("Поиск..."):
-                    query_words = DataProcessor.split_preserve_sizes(search_query)
-                    require_all = exact_match and not partial_match
-                    
-                    search_df = combined_df.copy()
-                    search_df['__match_count'] = search_df[selected_column].apply(
-                        lambda text: DataProcessor.match_query(text, query_words, require_all=require_all)
-                    )
-
-                    results = search_df[search_df['__match_count'] > 0]
-                    results = results.sort_values(by='__match_count', ascending=False)
-                    results = results.drop(columns='__match_count')
-
-                    st.success(f"🔎 Найдено: {len(results)} записей")
-                    UIComponents.show_results(results, selected_columns)
+            if st.button("🔍 Найти", key="search_button") or search_query:
+                self.perform_search()
 
 if __name__ == "__main__":
     GoogleSheetSearchApp()

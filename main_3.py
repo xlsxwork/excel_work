@@ -169,12 +169,12 @@ class UIComponents:
             font-size: 0.95rem;
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
         """
-    
+
         html = "<div style='margin-top: 10px;'>"
         for name in sheet_names:
             html += f"<div style='{card_style}'>{name}</div>"
         html += "</div>"
-    
+
         st.markdown(html, unsafe_allow_html=True)
 
     @staticmethod
@@ -338,10 +338,6 @@ class GoogleSheetSearchApp:
                     
                     # Показываем источники данных
                     UIComponents.show_sheet_sources(sheet_names)
-                    
-                    # Автоматически запускаем поиск, если есть запрос
-                    if st.session_state.get('search_query'):
-                        self.perform_search()
             return True
             
         except gspread.exceptions.APIError as e:
@@ -380,6 +376,7 @@ class GoogleSheetSearchApp:
             UIComponents.show_results(results, selected_columns, st.session_state.latest_price_col)
 
     def show_main_app(self):
+        # Показываем доступные таблицы
         if st.session_state.available_sheets:
             st.subheader("📂 Доступные Google Таблицы")
             cols = st.columns(3)
@@ -394,9 +391,11 @@ class GoogleSheetSearchApp:
                             st.session_state.sheet_url = sheet['url']
                             st.session_state.data_loaded = False
                             self.load_data(sheet['url'])
+                            st.rerun()
                 col_index = (col_index + 1) % 3
             st.divider()
         
+        # Поле для ввода ссылки
         sheet_url = st.text_input(
             "📎 Вставьте ссылку на Google Таблицу",
             value=st.session_state.get('sheet_url', ''),
@@ -405,53 +404,80 @@ class GoogleSheetSearchApp:
             on_change=lambda: self.load_data(st.session_state.sheet_url)
         )
 
+        # Показываем источники данных, если они есть
+        if st.session_state.sheet_names:
+            UIComponents.show_sheet_sources(st.session_state.sheet_names)
+
+        # Основной функционал поиска
         if st.session_state.data_loaded and st.session_state.combined_df is not None:
             combined_df = st.session_state.combined_df
             
-            # Определяем стандартные колонки для вывода
-            default_columns = ['Лист']
-            if 'URL' in combined_df.columns:
-                default_columns.append('URL')
-            if 'Название' in combined_df.columns:
-                default_columns.append('Название')
-            elif 'название' in combined_df.columns:
-                default_columns.append('название')
-            else:
-                default_columns.append(combined_df.columns[0])
-            
-            # Добавляем колонки с ценами
-            if st.session_state.price_columns:
-                default_columns.extend(st.session_state.price_columns)
-            
-            all_columns = [col for col in combined_df.columns if col != 'Лист']
-            all_columns = ['Лист'] + sorted(all_columns)
-            
-            selected_columns = st.multiselect(
-                "📋 Выберите колонки для вывода",
-                options=all_columns,
-                default=default_columns,
-                key="output_columns"
-            )
+            # Поле выбора колонки для поиска
+            col1, col2 = st.columns(2)
+            with col1:
+                # Определяем индекс колонки "Название" по умолчанию
+                default_index = 0
+                if 'Название' in combined_df.columns:
+                    default_index = list(combined_df.columns).index('Название')
+                elif 'название' in combined_df.columns:
+                    default_index = list(combined_df.columns).index('название')
+                
+                selected_column = st.selectbox(
+                    "📁 Выберите колонку для поиска",
+                    combined_df.columns,
+                    index=default_index,
+                    key="column_select"
+                )
+                st.session_state.search_column = selected_column
 
+            # Поле выбора колонок для вывода
+            with col2:
+                # Определяем стандартные колонки для вывода
+                default_columns = ['Лист']
+                if 'URL' in combined_df.columns:
+                    default_columns.append('URL')
+                if 'Название' in combined_df.columns:
+                    default_columns.append('Название')
+                elif 'название' in combined_df.columns:
+                    default_columns.append('название')
+                
+                # Добавляем колонки с ценами
+                if st.session_state.price_columns:
+                    default_columns.extend(st.session_state.price_columns)
+                
+                all_columns = [col for col in combined_df.columns if col != 'Лист']
+                all_columns = ['Лист'] + sorted(all_columns)
+                
+                selected_columns = st.multiselect(
+                    "📋 Выберите колонки для вывода",
+                    options=all_columns,
+                    default=default_columns,
+                    key="output_columns"
+                )
+
+            # Поле поиска и параметры
             search_query = st.text_input(
                 "🔎 Введите слово или часть слова для поиска", 
-                key="search_query",
-                on_change=self.perform_search
+                key="search_query"
             )
 
-            exact_match = st.checkbox(
-                "🧩 Только полное совпадение всех слов", 
-                value=True, 
-                key="exact_match",
-                on_change=self.perform_search
-            )
-            partial_match = st.checkbox(
-                "🔍 Частичное совпадение", 
-                key="partial_match",
-                on_change=self.perform_search
-            )
+            # Чекбоксы для фильтров поиска
+            col3, col4 = st.columns(2)
+            with col3:
+                exact_match = st.checkbox(
+                    "🧩 Только полное совпадение всех слов", 
+                    value=True, 
+                    key="exact_match"
+                )
+            with col4:
+                partial_match = st.checkbox(
+                    "🔍 Частичное совпадение", 
+                    key="partial_match"
+                )
 
-            if st.button("🔍 Найти", key="search_button") or search_query:
+            # Кнопка поиска
+            if st.button("🔍 Найти", key="search_button") or (search_query and st.session_state.get('search_trigger')):
+                st.session_state.search_trigger = True
                 self.perform_search()
 
 if __name__ == "__main__":

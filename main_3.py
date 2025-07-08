@@ -157,7 +157,6 @@ class UIComponents:
     def show_sheet_sources(sheet_names):
         st.markdown("### 📌 Данные собираются со следующих сайтов:")
         
-        # Устанавливаем базовые стили для карточек
         card_style = """
             display: inline-block;
             margin: 6px;
@@ -189,7 +188,6 @@ class UIComponents:
             if selected_columns:
                 columns_to_show = [col for col in selected_columns if col in results.columns]
                 
-                # Переименовываем колонку с последней ценой
                 if latest_price_col and latest_price_col in columns_to_show:
                     columns_to_show = [
                         f"Цена актуальная ({latest_price_col})" if col == latest_price_col else col 
@@ -290,15 +288,21 @@ class GoogleSheetSearchApp:
 
     def load_available_sheets(self):
         try:
-            sheets = self.client.openall()
-            st.session_state.available_sheets = [
-                {
-                    'title': sheet.title,
-                    'url': f"https://docs.google.com/spreadsheets/d/{sheet.id}/edit#gid={sheet.sheet1.id}",
-                    'id': sheet.id
-                }
-                for sheet in sheets
-            ]
+            with st.spinner("Поиск доступных таблиц..."):
+                sheets = self.client.openall()
+                if not sheets:
+                    st.warning("Не найдено ни одной доступной таблицы")
+                    st.session_state.available_sheets = []
+                else:
+                    st.session_state.available_sheets = [
+                        {
+                            'title': sheet.title,
+                            'url': f"https://docs.google.com/spreadsheets/d/{sheet.id}",
+                            'id': sheet.id
+                        }
+                        for sheet in sheets
+                    ]
+                    st.success(f"Найдено {len(sheets)} таблиц")
         except Exception as e:
             st.error(f"Ошибка при загрузке списка таблиц: {str(e)}")
             st.session_state.available_sheets = []
@@ -330,11 +334,9 @@ class GoogleSheetSearchApp:
                     st.session_state.data_loaded = True
                     st.session_state.sheet_names = sheet_names
                     
-                    # Определяем колонки с ценами
                     price_columns = DataProcessor.extract_price_columns(st.session_state.combined_df)
                     st.session_state.price_columns = DataProcessor.sort_price_columns(price_columns)
                     
-                    # Находим самую новую цену
                     if st.session_state.price_columns:
                         st.session_state.latest_price_col = st.session_state.price_columns[0]
                     
@@ -377,7 +379,6 @@ class GoogleSheetSearchApp:
             st.success(f"🔎 Найдено: {len(results)} записей")
 
     def show_main_app(self):
-        # Всегда показываем доступные таблицы
         if st.session_state.available_sheets:
             st.subheader("📂 Доступные Google Таблицы")
             cols = st.columns(3)
@@ -397,7 +398,6 @@ class GoogleSheetSearchApp:
                 col_index = (col_index + 1) % 3
             st.divider()
         
-        # Поле для ввода ссылки
         sheet_url = st.text_input(
             "📎 Вставьте ссылку на Google Таблицу",
             value=st.session_state.get('sheet_url', ''),
@@ -406,26 +406,21 @@ class GoogleSheetSearchApp:
             on_change=lambda: setattr(st.session_state, 'need_load', True)
         )
 
-        # Загрузка данных при изменении URL
         if hasattr(st.session_state, 'need_load') and st.session_state.need_load:
             st.session_state.need_load = False
             st.session_state.search_results = None
             if self.load_data(st.session_state.sheet_url):
                 st.rerun()
 
-        # Показываем источники данных только если они есть
         if st.session_state.data_loaded and st.session_state.sheet_names:
             UIComponents.show_sheet_sources(st.session_state.sheet_names)
             st.divider()
 
-        # Основной функционал поиска
         if st.session_state.data_loaded and st.session_state.combined_df is not None:
             combined_df = st.session_state.combined_df
             
-            # Поле выбора колонки для поиска
             col1, col2 = st.columns(2)
             with col1:
-                # Определяем индекс колонки "Название" по умолчанию
                 default_index = 0
                 if 'Название' in combined_df.columns:
                     default_index = list(combined_df.columns).index('Название')
@@ -440,9 +435,7 @@ class GoogleSheetSearchApp:
                 )
                 st.session_state.search_column = selected_column
 
-            # Поле выбора колонок для вывода
             with col2:
-                # Определяем стандартные колонки для вывода
                 default_columns = ['Лист']
                 if 'URL' in combined_df.columns:
                     default_columns.append('URL')
@@ -451,7 +444,6 @@ class GoogleSheetSearchApp:
                 elif 'название' in combined_df.columns:
                     default_columns.append('название')
                 
-                # Добавляем колонки с ценами
                 if st.session_state.price_columns:
                     default_columns.extend(st.session_state.price_columns)
                 
@@ -465,14 +457,12 @@ class GoogleSheetSearchApp:
                     key="output_columns"
                 )
 
-            # Форма для поиска (чтобы работал Enter)
             with st.form(key='search_form'):
                 search_query = st.text_input(
                     "🔎 Введите слово или часть слова для поиска", 
                     key="search_query"
                 )
 
-                # Чекбоксы для фильтров поиска
                 col3, col4 = st.columns(2)
                 with col3:
                     exact_match = st.checkbox(
@@ -490,7 +480,6 @@ class GoogleSheetSearchApp:
                 if submitted:
                     self.perform_search()
 
-            # Отображение результатов (вне формы, чтобы работал download_button)
             if st.session_state.search_results is not None:
                 UIComponents.show_results(
                     st.session_state.search_results, 

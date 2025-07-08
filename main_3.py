@@ -179,6 +179,23 @@ class UIComponents:
     @staticmethod
     def show_results(results, selected_columns, latest_price_col=None):
         if not results.empty:
+            # Блок с количеством найденных товаров
+            st.markdown(
+                f"""
+                <div style='
+                    background-color: #e6f7e6;
+                    border-left: 5px solid #4CAF50;
+                    padding: 10px;
+                    margin-bottom: 20px;
+                    border-radius: 4px;
+                '>
+                    <h3 style='color: #4CAF50; margin: 0;'>🔍 Найдено товаров: {len(results)}</h3>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            
+            # Таблица результатов
             results = results.reset_index(drop=True)
             results.index = results.index + 2
             results.index.name = "№ строки"
@@ -352,13 +369,13 @@ class GoogleSheetSearchApp:
         search_query = st.session_state.get('search_query', '')
         if not search_query or not st.session_state.data_loaded or st.session_state.combined_df is None:
             return
-    
+
         combined_df = st.session_state.combined_df
         selected_column = st.session_state.search_column
         selected_columns = st.session_state.get('output_columns', [])
         exact_match = st.session_state.get('exact_match', True)
         partial_match = st.session_state.get('partial_match', False)
-    
+
         with st.spinner("Поиск..."):
             query_words = DataProcessor.split_preserve_sizes(search_query)
             require_all = exact_match and not partial_match
@@ -367,20 +384,13 @@ class GoogleSheetSearchApp:
             search_df['__match_count'] = search_df[selected_column].apply(
                 lambda text: DataProcessor.match_query(text, query_words, require_all=require_all)
             )
-    
+
             results = search_df[search_df['__match_count'] > 0]
             results = results.sort_values(by='__match_count', ascending=False)
             results = results.drop(columns='__match_count')
-    
+
             st.session_state.search_results = results
-            
-            # Заменяем st.success() на st.markdown() с зеленым фоном
-            st.markdown(
-                f'<div style="background-color:#4CAF50;color:white;padding:10px;border-radius:5px;">'
-                f'🔎 Найдено: {len(results)} записей'
-                f'</div>',
-                unsafe_allow_html=True
-            )
+            st.rerun()  # Обновляем интерфейс для отображения результатов
 
     def show_main_app(self):
         # Загружаем список таблиц только один раз
@@ -494,7 +504,6 @@ class GoogleSheetSearchApp:
                 submitted = st.form_submit_button("🔍 Найти")
                 if submitted:
                     self.perform_search()
-                    st.rerun()
 
             # Результаты поиска
             if st.session_state.search_results is not None:

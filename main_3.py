@@ -156,14 +156,26 @@ class UIComponents:
     @staticmethod
     def show_sheet_sources(sheet_names):
         st.markdown("### 📌 Данные собираются со следующих сайтов:")
-        cols = st.columns(4)
-        col_idx = 0
         
+        # Устанавливаем базовые стили для карточек
+        card_style = """
+            display: inline-block;
+            margin: 6px;
+            padding: 10px 18px;
+            background-color: #d43f3a;
+            color: white;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+        """
+    
+        html = "<div style='margin-top: 10px;'>"
         for name in sheet_names:
-            with cols[col_idx]:
-                st.markdown(f"<div style='padding: 0.7rem; background-color: #37745B; border-radius: 0.8rem; text-align: center;'>{name}</div>", 
-                          unsafe_allow_html=True)
-            col_idx = (col_idx + 1) % 4
+            html += f"<div style='{card_style}'>{name}</div>"
+        html += "</div>"
+    
+        st.markdown(html, unsafe_allow_html=True)
 
     @staticmethod
     def show_results(results, selected_columns, latest_price_col=None):

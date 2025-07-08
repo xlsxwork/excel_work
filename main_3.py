@@ -260,6 +260,8 @@ class GoogleSheetSearchApp:
             st.session_state.price_columns = []
         if 'latest_price_col' not in st.session_state:
             st.session_state.latest_price_col = None
+        if 'search_triggered' not in st.session_state:
+            st.session_state.search_triggered = False
 
     def authenticate(self):
         if not st.session_state.authenticated:
@@ -335,9 +337,6 @@ class GoogleSheetSearchApp:
                         st.session_state.latest_price_col = st.session_state.price_columns[0]
                     
                     st.success(f"✅ Данные успешно загружены. Записей: {len(st.session_state.combined_df)}")
-                    
-                    # Показываем источники данных
-                    UIComponents.show_sheet_sources(sheet_names)
             return True
             
         except gspread.exceptions.APIError as e:
@@ -376,7 +375,7 @@ class GoogleSheetSearchApp:
             UIComponents.show_results(results, selected_columns, st.session_state.latest_price_col)
 
     def show_main_app(self):
-        # Показываем доступные таблицы
+        # Всегда показываем доступные таблицы
         if st.session_state.available_sheets:
             st.subheader("📂 Доступные Google Таблицы")
             cols = st.columns(3)
@@ -390,8 +389,8 @@ class GoogleSheetSearchApp:
                         if st.button(f"Выбрать {sheet['title']}", key=f"select_{sheet['id']}"):
                             st.session_state.sheet_url = sheet['url']
                             st.session_state.data_loaded = False
-                            self.load_data(sheet['url'])
-                            st.rerun()
+                            if self.load_data(sheet['url']):
+                                st.rerun()
                 col_index = (col_index + 1) % 3
             st.divider()
         
@@ -401,12 +400,19 @@ class GoogleSheetSearchApp:
             value=st.session_state.get('sheet_url', ''),
             key="sheet_url",
             help="Пример: https://docs.google.com/spreadsheets/d/ID_ТАБЛИЦЫ/edit#gid=ID_ЛИСТА",
-            on_change=lambda: self.load_data(st.session_state.sheet_url)
+            on_change=lambda: setattr(st.session_state, 'need_load', True)
         )
 
-        # Показываем источники данных, если они есть
-        if st.session_state.sheet_names:
+        # Загрузка данных при изменении URL
+        if hasattr(st.session_state, 'need_load') and st.session_state.need_load:
+            st.session_state.need_load = False
+            if self.load_data(st.session_state.sheet_url):
+                st.rerun()
+
+        # Показываем источники данных только если они есть
+        if st.session_state.data_loaded and st.session_state.sheet_names:
             UIComponents.show_sheet_sources(st.session_state.sheet_names)
+            st.divider()
 
         # Основной функционал поиска
         if st.session_state.data_loaded and st.session_state.combined_df is not None:
@@ -455,30 +461,32 @@ class GoogleSheetSearchApp:
                     key="output_columns"
                 )
 
-            # Поле поиска и параметры
-            search_query = st.text_input(
-                "🔎 Введите слово или часть слова для поиска", 
-                key="search_query"
-            )
-
-            # Чекбоксы для фильтров поиска
-            col3, col4 = st.columns(2)
-            with col3:
-                exact_match = st.checkbox(
-                    "🧩 Только полное совпадение всех слов", 
-                    value=True, 
-                    key="exact_match"
-                )
-            with col4:
-                partial_match = st.checkbox(
-                    "🔍 Частичное совпадение", 
-                    key="partial_match"
+            # Форма для поиска (чтобы работал Enter)
+            with st.form(key='search_form'):
+                search_query = st.text_input(
+                    "🔎 Введите слово или часть слова для поиска", 
+                    key="search_query"
                 )
 
-            # Кнопка поиска
-            if st.button("🔍 Найти", key="search_button") or (search_query and st.session_state.get('search_trigger')):
-                st.session_state.search_trigger = True
-                self.perform_search()
+                # Чекбоксы для фильтров поиска
+                col3, col4 = st.columns(2)
+                with col3:
+                    exact_match = st.checkbox(
+                        "🧩 Только полное совпадение всех слов", 
+                        value=True, 
+                        key="exact_match"
+                    )
+                with col4:
+                    partial_match = st.checkbox(
+                        "🔍 Частичное совпадение", 
+                        key="partial_match"
+                    )
+
+                submitted = st.form_submit_button("🔍 Найти")
+                if submitted or st.session_state.get('search_triggered'):
+                    st.session_state.search_triggered = True
+                    self.perform_search()
+                    st.session_state.search_triggered = False
 
 if __name__ == "__main__":
     GoogleSheetSearchApp()

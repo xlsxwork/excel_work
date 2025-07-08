@@ -262,6 +262,8 @@ class GoogleSheetSearchApp:
             st.session_state.latest_price_col = None
         if 'search_triggered' not in st.session_state:
             st.session_state.search_triggered = False
+        if 'search_results' not in st.session_state:
+            st.session_state.search_results = None
 
     def authenticate(self):
         if not st.session_state.authenticated:
@@ -371,8 +373,8 @@ class GoogleSheetSearchApp:
             results = results.sort_values(by='__match_count', ascending=False)
             results = results.drop(columns='__match_count')
 
+            st.session_state.search_results = results
             st.success(f"🔎 Найдено: {len(results)} записей")
-            UIComponents.show_results(results, selected_columns, st.session_state.latest_price_col)
 
     def show_main_app(self):
         # Всегда показываем доступные таблицы
@@ -389,6 +391,7 @@ class GoogleSheetSearchApp:
                         if st.button(f"Выбрать {sheet['title']}", key=f"select_{sheet['id']}"):
                             st.session_state.sheet_url = sheet['url']
                             st.session_state.data_loaded = False
+                            st.session_state.search_results = None
                             if self.load_data(sheet['url']):
                                 st.rerun()
                 col_index = (col_index + 1) % 3
@@ -406,6 +409,7 @@ class GoogleSheetSearchApp:
         # Загрузка данных при изменении URL
         if hasattr(st.session_state, 'need_load') and st.session_state.need_load:
             st.session_state.need_load = False
+            st.session_state.search_results = None
             if self.load_data(st.session_state.sheet_url):
                 st.rerun()
 
@@ -483,10 +487,16 @@ class GoogleSheetSearchApp:
                     )
 
                 submitted = st.form_submit_button("🔍 Найти")
-                if submitted or st.session_state.get('search_triggered'):
-                    st.session_state.search_triggered = True
+                if submitted:
                     self.perform_search()
-                    st.session_state.search_triggered = False
+
+            # Отображение результатов (вне формы, чтобы работал download_button)
+            if st.session_state.search_results is not None:
+                UIComponents.show_results(
+                    st.session_state.search_results, 
+                    selected_columns, 
+                    st.session_state.latest_price_col
+                )
 
 if __name__ == "__main__":
     GoogleSheetSearchApp()

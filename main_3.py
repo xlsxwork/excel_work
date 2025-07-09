@@ -155,26 +155,9 @@ class UIComponents:
 
     @staticmethod
     def show_sheet_sources(sheet_names):
-        st.markdown("### 📌 Данные собираются со следующих сайтов:")
-        
-        card_style = """
-            display: inline-block;
-            margin: 6px;
-            padding: 10px 18px;
-            background-color: #d43f3a;
-            color: white;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 0.95rem;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-        """
-
-        html = "<div style='margin-top: 10px;'>"
+        st.markdown("### 📌 Источники данных:")
         for name in sheet_names:
-            html += f"<div style='{card_style}'>{name}</div>"
-        html += "</div>"
-
-        st.markdown(html, unsafe_allow_html=True)
+            st.markdown(f"- {name}")
 
     @staticmethod
     def show_results(results, selected_columns, latest_price_col=None):
@@ -390,7 +373,7 @@ class GoogleSheetSearchApp:
             results = results.drop(columns='__match_count')
 
             st.session_state.search_results = results
-            st.rerun()  # Обновляем интерфейс для отображения результатов
+            st.rerun()
 
     def show_main_app(self):
         # Загружаем список таблиц только один раз
@@ -416,6 +399,11 @@ class GoogleSheetSearchApp:
                             if self.load_data(sheet['url']):
                                 st.rerun()
                 col_index = (col_index + 1) % 3
+            
+            # Показываем источники данных сразу после выбора таблицы
+            if st.session_state.data_loaded and st.session_state.sheet_names:
+                UIComponents.show_sheet_sources(st.session_state.sheet_names)
+            
             st.divider()
         
         # Поле для ввода ссылки
@@ -432,11 +420,6 @@ class GoogleSheetSearchApp:
             st.session_state.search_results = None
             if self.load_data(sheet_url):
                 st.rerun()
-
-        # Показываем источники данных
-        if st.session_state.data_loaded and st.session_state.sheet_names:
-            UIComponents.show_sheet_sources(st.session_state.sheet_names)
-            st.divider()
 
         # Основной функционал поиска
         if st.session_state.data_loaded and st.session_state.combined_df is not None:

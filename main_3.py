@@ -176,15 +176,27 @@ class UIComponents:
             if 'URL' in display_df.columns:
                 display_df['URL'] = display_df['URL'].apply(UIComponents.make_url_clickable)
             
-            # Отображаем таблицу
+            # Отображаем таблицу в контейнере с фиксированной высотой и скроллом
             if selected_columns:
                 columns_to_show = [col for col in selected_columns if col in display_df.columns]
                 filtered_df = display_df[columns_to_show]
             else:
                 filtered_df = display_df
 
+            # Контейнер с фиксированной высотой и скроллом
             st.markdown(
-                filtered_df.to_html(escape=False, index=True),
+                f"""
+                <div style='
+                    height: 500px;
+                    overflow-y: auto;
+                    border: 1px solid #e1e4e8;
+                    border-radius: 4px;
+                    padding: 10px;
+                    margin-bottom: 20px;
+                '>
+                    {filtered_df.to_html(escape=False, index=True)}
+                </div>
+                """,
                 unsafe_allow_html=True
             )
 

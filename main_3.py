@@ -5,7 +5,6 @@ import gspread
 from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 
 # --- Конфигурация через Streamlit Secrets ---
 class AppConfig:
@@ -117,31 +116,14 @@ class DataProcessor:
 
     @staticmethod
     def extract_price_columns(df):
-        price_cols = []
-        date_pattern = re.compile(r'Цена\s*\n?\s*\d{4}-\d{2}-\d{2}')
-        
-        for col in df.columns:
-            if col.lower().startswith('цена') or date_pattern.search(col):
-                price_cols.append(col)
-        
+        price_cols = [col for col in df.columns if 'актуальн' in col.lower() and 'цена' in col.lower()]
+        if not price_cols:
+            price_cols = [col for col in df.columns if col.lower() == 'цена']
         return price_cols
     
     @staticmethod
     def sort_price_columns(price_columns):
-        date_pattern = re.compile(r'\d{4}-\d{2}-\d{2}')
-        
-        dated_cols = []
-        for col in price_columns:
-            match = date_pattern.search(col)
-            if match:
-                date_str = match.group()
-                dated_cols.append((col, datetime.strptime(date_str, '%Y-%m-%d')))
-        
-        if dated_cols:
-            dated_cols.sort(key=lambda x: x[1], reverse=True)
-            return [col[0] for col in dated_cols]
-        
-        return price_columns
+        return price_columns[:1]
 
 # --- UI ---
 class UIComponents:
@@ -160,9 +142,17 @@ class UIComponents:
             st.markdown(f"- {name}")
 
     @staticmethod
-    def show_results(results, selected_columns, latest_price_col=None):
+    def make_url_clickable(url):
+        if pd.isna(url) or not str(url).strip():
+            return ""
+        url = str(url).strip()
+        if not url.startswith(('http://', 'https://')):
+            url = 'http://' + url
+        return f'<a href="{url}" target="_blank">{url}</a>'
+
+    @staticmethod
+    def show_results(results, selected_columns):
         if not results.empty:
-            # Блок с количеством найденных товаров
             st.markdown(
                 f"""
                 <div style='
@@ -178,54 +168,61 @@ class UIComponents:
                 unsafe_allow_html=True
             )
             
-            # Таблица результатов
-            results = results.reset_index(drop=True)
-            results.index = results.index + 2
-            results.index.name = "№ строки"
+            # Создаем копию для отображения
+            display_df = results.copy().reset_index(drop=True)
+            display_df.index = display_df.index + 2
+            display_df.index.name = "№ строки"
             
-            results_with_index = results.reset_index()
+            if 'URL' in display_df.columns:
+                display_df['URL'] = display_df['URL'].apply(UIComponents.make_url_clickable)
             
+            # Отображаем таблицу
             if selected_columns:
-                columns_to_show = [col for col in selected_columns if col in results.columns]
-                
-                if latest_price_col and latest_price_col in columns_to_show:
-                    columns_to_show = [
-                        f"Цена актуальная ({latest_price_col})" if col == latest_price_col else col 
-                        for col in columns_to_show
-                    ]
-                    results_with_index = results_with_index.rename(
-                        columns={latest_price_col: f"Цена актуальная ({latest_price_col})"}
-                    )
-                
-                filtered_results = results_with_index[columns_to_show]
+                columns_to_show = [col for col in selected_columns if col in display_df.columns]
+                filtered_df = display_df[columns_to_show]
             else:
-                filtered_results = results_with_index
+                filtered_df = display_df
 
-            st.dataframe(
-                filtered_results,
-                use_container_width=True,
-                hide_index=False,
-                column_config={
-                    "№ строки": st.column_config.NumberColumn(
-                        "№ строки",
-                        help="Номер строки в исходной таблице",
-                        width="small"
-                    )
-                }
+            st.markdown(
+                filtered_df.to_html(escape=False, index=True),
+                unsafe_allow_html=True
             )
 
-            excel_buffer = BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                filtered_results.to_excel(writer, index=False, sheet_name='Результаты')
+            # Подготовка данных для экспорта
+            export_df = results.copy().reset_index(drop=True)
+            if selected_columns:
+                export_columns = [col for col in selected_columns if col in export_df.columns]
+                export_df = export_df[export_columns]
             
-            excel_buffer.seek(0)
+            # Кнопки экспорта
+            col1, col2 = st.columns(2)
             
-            st.download_button(
-                label="⬇️ Скачать результаты в Excel",
-                data=excel_buffer,
-                file_name="search_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            with col1:
+                # Экспорт в Excel
+                excel_buffer = BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    export_df.to_excel(writer, index=False, sheet_name='Результаты')
+                excel_buffer.seek(0)
+                
+                st.download_button(
+                    label="⬇️ Скачать в Excel",
+                    data=excel_buffer,
+                    file_name="search_results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            with col2:
+                # Экспорт в CSV
+                csv_buffer = BytesIO()
+                export_df.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+                csv_buffer.seek(0)
+                
+                st.download_button(
+                    label="⬇️ Скачать в CSV",
+                    data=csv_buffer,
+                    file_name="search_results.csv",
+                    mime="text/csv"
+                )
 
 # --- Основное приложение ---
 class GoogleSheetSearchApp:
@@ -249,7 +246,6 @@ class GoogleSheetSearchApp:
             'search_column': "Название",
             'sheet_names': [],
             'price_columns': [],
-            'latest_price_col': None,
             'search_triggered': False,
             'search_results': None,
             'sheets_loaded': False,
@@ -334,9 +330,6 @@ class GoogleSheetSearchApp:
                     price_columns = DataProcessor.extract_price_columns(st.session_state.combined_df)
                     st.session_state.price_columns = DataProcessor.sort_price_columns(price_columns)
                     
-                    if st.session_state.price_columns:
-                        st.session_state.latest_price_col = st.session_state.price_columns[0]
-                    
                     st.success(f"✅ Данные успешно загружены. Записей: {len(st.session_state.combined_df)}")
             return True
             
@@ -368,7 +361,7 @@ class GoogleSheetSearchApp:
                 lambda text: DataProcessor.match_query(text, query_words, require_all=require_all)
             )
 
-            results = search_df[search_df['__match_count'] > 0]
+            results = search_df[search_df['__match_count'] > 0].copy()
             results = results.sort_values(by='__match_count', ascending=False)
             results = results.drop(columns='__match_count')
 
@@ -376,12 +369,10 @@ class GoogleSheetSearchApp:
             st.rerun()
 
     def show_main_app(self):
-        # Загружаем список таблиц только один раз
         if not st.session_state.sheets_loaded:
             self.load_available_sheets()
             st.rerun()
 
-        # Показываем доступные таблицы
         if st.session_state.available_sheets:
             st.subheader("📂 Доступные Google Таблицы")
             cols = st.columns(3)
@@ -400,13 +391,11 @@ class GoogleSheetSearchApp:
                                 st.rerun()
                 col_index = (col_index + 1) % 3
             
-            # Показываем источники данных сразу после выбора таблицы
             if st.session_state.data_loaded and st.session_state.sheet_names:
                 UIComponents.show_sheet_sources(st.session_state.sheet_names)
             
             st.divider()
         
-        # Поле для ввода ссылки
         sheet_url = st.text_input(
             "📎 Вставьте ссылку на Google Таблицу",
             value=st.session_state.get('sheet_url', ''),
@@ -414,18 +403,15 @@ class GoogleSheetSearchApp:
             help="Пример: https://docs.google.com/spreadsheets/d/ID_ТАБЛИЦЫ/edit#gid=ID_ЛИСТА"
         )
 
-        # Кнопка загрузки данных
         if st.button("Загрузить данные", disabled=not sheet_url):
             st.session_state.need_load = True
             st.session_state.search_results = None
             if self.load_data(sheet_url):
                 st.rerun()
 
-        # Основной функционал поиска
         if st.session_state.data_loaded and st.session_state.combined_df is not None:
             combined_df = st.session_state.combined_df
             
-            # Настройки поиска
             col1, col2 = st.columns(2)
             with col1:
                 default_index = 0
@@ -452,7 +438,7 @@ class GoogleSheetSearchApp:
                     default_columns.append('название')
                 
                 if st.session_state.price_columns:
-                    default_columns.extend(st.session_state.price_columns)
+                    default_columns.append(st.session_state.price_columns[0])
                 
                 all_columns = [col for col in combined_df.columns if col != 'Лист']
                 all_columns = ['Лист'] + sorted(all_columns)
@@ -464,7 +450,6 @@ class GoogleSheetSearchApp:
                     key="output_columns"
                 )
 
-            # Форма поиска
             with st.form(key='search_form'):
                 search_query = st.text_input(
                     "🔎 Введите слово или часть слова для поиска", 
@@ -488,12 +473,10 @@ class GoogleSheetSearchApp:
                 if submitted:
                     self.perform_search()
 
-            # Результаты поиска
             if st.session_state.search_results is not None:
                 UIComponents.show_results(
                     st.session_state.search_results, 
-                    st.session_state.get('output_columns', []), 
-                    st.session_state.latest_price_col
+                    st.session_state.get('output_columns', [])
                 )
 
 if __name__ == "__main__":
